@@ -4,7 +4,7 @@ A Redis client library for Ada implementing the RESP2 protocol.
 
 ## Status
 
-**Early development** — RESP2 codec complete with tests. Connection layer and command support coming next.
+**v0.2 development** — RESP2 codec complete, TCP connection layer added. Command convenience wrappers and pooling coming next.
 
 ## Features
 
@@ -13,7 +13,10 @@ A Redis client library for Ada implementing the RESP2 protocol.
 - ✅ Null values (null bulk, null array)
 - ✅ Nested arrays (recursive)
 - ✅ Incremental parser (handles partial input)
-- ✅ 60+ test cases covering edge cases
+- ✅ TCP connection layer with blocking sockets
+- ✅ Command execution API (Execute with String_Vector arguments)
+- ✅ Connection error handling (DNS, refused, timeout)
+- ✅ 60+ RESP2 tests + 9 connection tests (4 unit + 5 live)
 
 ## Build
 
@@ -26,9 +29,12 @@ gprbuild -p -P redis_ada.gpr
 # Build and run tests
 gprbuild -p -P redis_ada_tests.gpr
 ./bin/redis-resp2-tests
+./bin/redis-connection-tests  # Runs unit tests; live tests require Redis on 127.0.0.1:6380
 ```
 
 ## Usage
+
+### RESP2 Codec
 
 ```ada
 with Redis.RESP2; use Redis.RESP2;
@@ -55,14 +61,54 @@ begin
 end;
 ```
 
+### Connection Layer
+
+```ada
+with Redis.Connection; use Redis.Connection;
+with Redis.RESP2;      use Redis.RESP2;
+
+declare
+   Conn  : Redis_Connection;
+   Args  : String_Vector;
+   Reply : Redis.RESP2.Reply;
+begin
+   Connect (Conn, "localhost", 6379, Timeout => 5.0);
+
+   --  PING
+   Args.Append ("PING");
+   Execute (Conn, Args, Reply);
+   --  Reply is now Simple_String("PONG")
+
+   --  SET key value
+   Args.Clear;
+   Args.Append ("SET");
+   Args.Append ("mykey");
+   Args.Append ("myvalue");
+   Execute (Conn, Args, Reply);
+   --  Reply is now Simple_String("OK")
+
+   --  GET key
+   Args.Clear;
+   Args.Append ("GET");
+   Args.Append ("mykey");
+   Execute (Conn, Args, Reply);
+   --  Reply is now Bulk_String("myvalue")
+
+   Disconnect (Conn);
+end;
+```
+
 ## Roadmap
 
 - [x] RESP2 codec with test suite
-- [ ] TCP connection layer (sockets)
-- [ ] Core commands (GET, SET, DEL, PING, KEYS, …)
+- [x] TCP connection layer (sockets)
+- [x] Command execution API (Execute with String_Vector)
+- [ ] High-level command wrappers (typed API for GET, SET, etc.)
+- [ ] AUTH/SELECT support
 - [ ] Pipeline support
 - [ ] Pub/Sub
 - [ ] Connection pooling
+- [ ] RESP3 support
 - [ ] Alire publication
 
 ## License
