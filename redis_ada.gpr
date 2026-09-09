@@ -5,4 +5,7 @@ library project Redis_Ada is
    for Library_Name use "redis_ada";
    for Library_Kind use "dynamic";
    for Create_Missing_Dirs use "True";
+   package Compiler is
+      for Default_Switches ("Ada") use ("-gnatwa", "-gnatwe", "-O2");
+   end Compiler;
 end Redis_Ada;

@@ -1,6 +1,6 @@
 name = "redis_ada"
-description = "Redis client library for Ada: RESP2 protocol codec and connection layer"
-version = "0.2.0"
+description = "Redis client library for Ada: RESP2 codec, pub/sub, connection pool"
+version = "0.2.0-dev"
 
 authors = ["Konstantin Khlopkov"]
 maintainers = ["Konstantin Khlopkov <konstantin.khlopkov93@gmail.com>"]
