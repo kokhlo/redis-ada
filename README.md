@@ -1,5 +1,7 @@
 # redis-ada
 
+[![CI](https://github.com/kokhlo/redis-ada/actions/workflows/build-test.yml/badge.svg)](https://github.com/kokhlo/redis-ada/actions/workflows/build-test.yml)
+
 A Redis client library for Ada implementing the RESP2 protocol.
 
 ## Status
@@ -17,6 +19,18 @@ A Redis client library for Ada implementing the RESP2 protocol.
 - ✅ Command execution API (Execute with String_Vector arguments)
 - ✅ Connection error handling (DNS, refused, timeout)
 - ✅ 60+ RESP2 tests + 9 connection tests (4 unit + 5 live)
+
+## Installation
+
+With [Alire](https://alire.ada.dev):
+
+```bash
+alr with redis
+```
+
+> **Note:** `redis` is available after the alire-index merge
+> ([PR](https://github.com/alire-project/alire-index/pull/2097)). Until then, use the repository directly:
+> `alr with --use /path/to/redis-ada`
 
 ## Build
 
@@ -97,6 +111,10 @@ begin
    Disconnect (Conn);
 end;
 ```
+
+Connections fail in production (timeouts, resets, DNS blips). For retries with
+exponential backoff and jitter, pair redis-ada with
+[backoff-ada](https://github.com/kokhlo/backoff-ada).
 
 ## Roadmap
 
