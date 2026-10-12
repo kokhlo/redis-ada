@@ -35,10 +35,18 @@ jobs:
         with:
           toolchain: gnat_native=14.2.1 gprbuild=25.0.1
 
+      - name: Expose Alire toolchain binaries on PATH
+        run: |
+          if ! command -v gprbuild >/dev/null 2>&1; then
+            for d in "$HOME"/.local/share/alire/toolchains/*/bin; do
+              echo "$d" >> "$GITHUB_PATH"
+            done
+          fi
+
       - name: Build library and tests
         run: |
           alr build
-          alr exec -- gprbuild -p -P redis_ada_tests.gpr
+          gprbuild -p -P redis_ada_tests.gpr
 
       - name: Run test suites
         run: |
