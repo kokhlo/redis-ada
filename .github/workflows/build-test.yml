@@ -75,7 +75,7 @@ jobs:
       - name: Build a dependent crate pinned to this checkout
         run: |
           cd ..
-          alr init myapp --bin
+          alr -n init myapp --bin
           cd myapp
-          alr with redis --use=../redis-ada
-          alr build
+          alr -n with redis --use=../redis-ada
+          alr -n build
