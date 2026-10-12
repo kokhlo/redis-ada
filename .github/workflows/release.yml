@@ -38,7 +38,7 @@ jobs:
       - name: Build library and tests
         run: |
           alr build
-          gprbuild -p -P redis_ada_tests.gpr
+          alr exec -- gprbuild -p -P redis_ada_tests.gpr
 
       - name: Run test suites
         run: |
