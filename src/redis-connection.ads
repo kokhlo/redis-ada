@@ -18,7 +18,13 @@ package Redis.Connection is
    Connection_Failed : exception;
    Protocol_Error    : exception;
 
+   --  Maximum bytes buffered for a single reply before giving up
+   --  (guards against a peer that never terminates a frame).
+   Max_Reply_Bytes : constant := 64 * 1024 * 1024;  -- 64 MiB
+
    --  Establish a TCP connection to a Redis server.
+   --  The timeout applies to DNS resolution, connect, and later sends and
+   --  receives on the socket.
    --  Raises Connection_Failed on DNS failure, connection refused, or timeout.
    procedure Connect
      (Conn    : in out Redis_Connection;
@@ -28,7 +34,12 @@ package Redis.Connection is
 
    --  Send a command (as an array of strings) and receive the reply.
    --  Args(1) is the command name (e.g. "PING"), Args(2..N) are arguments.
-   --  Raises Protocol_Error on malformed server response.
+   --  An empty Args vector is a usage error and raises Protocol_Error
+   --  before anything is written to the socket.
+   --  Raises Protocol_Error on malformed server response; the connection
+   --  is then marked dead (a resynchronising read is not possible without
+   --  talking to the server again, so the caller must reconnect).
+   --  Raises Connection_Failed on I/O errors or server disconnect.
    procedure Execute
      (Conn  : in out Redis_Connection;
       Args  : String_Vector;

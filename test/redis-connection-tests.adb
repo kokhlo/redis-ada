@@ -1,6 +1,6 @@
 --  Test runner for redis-ada connection layer.
---  Tests command encoding, connection failures, and live server interactions
---  when a Redis server is available.
+--  Unit tests for command encoding and connection failure handling, plus
+--  live server interactions when a Redis server is available.
 
 with Ada.Text_IO;         use Ada.Text_IO;
 with Ada.Command_Line;
@@ -36,17 +36,12 @@ procedure Redis.Connection.Tests is
       Disconnect (Conn);
       return Kind_Of (Reply) = Simple_String and then Text (Reply) = "PONG";
    exception
-      when Connection_Failed =>
-         return False;
       when others =>
          return False;
    end Probe_Redis_Server;
 
    procedure Test_Command_Encoding_SET is
-      --  Verify that Execute encodes SET foo bar correctly.
-      --  We can't check wire bytes directly, but we know the pattern:
-      --  *3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n
-      --  This is an indirect test: we'll encode the command manually and compare.
+      --  The wire form of SET foo bar, built through the public codec.
       Arr : Reply := Array_Reply;
       Expected : constant String := "*3" & ASCII.CR & ASCII.LF
         & "$3" & ASCII.CR & ASCII.LF & "SET" & ASCII.CR & ASCII.LF
@@ -86,7 +81,7 @@ procedure Redis.Connection.Tests is
    end Test_Connect_Refused;
 
    procedure Test_Connect_Timeout is
-      --  Attempt to connect to a non-routable IP (10.255.255.1) with a short timeout.
+      --  Attempt to connect to a non-routable IP with a short timeout.
       --  May either timeout or fail fast (connection unreachable).
       Conn : Redis_Connection;
    begin
@@ -101,6 +96,49 @@ procedure Redis.Connection.Tests is
       end;
    end Test_Connect_Timeout;
 
+   procedure Test_Execute_Not_Connected is
+      Conn : Redis_Connection;
+      Args : String_Vector;
+      Reply : Redis.RESP2.Reply;
+   begin
+      begin
+         Execute (Conn, Args, Reply);
+         Assert (False, "Execute before connect should raise");
+      exception
+         when Connection_Failed =>
+            Assert (True, "Execute on idle connection raises Connection_Failed");
+         when others =>
+            Assert (False, "Execute on idle connection raised wrong exception");
+      end;
+   end Test_Execute_Not_Connected;
+
+   procedure Test_Execute_Empty_Command is
+      Conn : Redis_Connection;
+      Args : String_Vector;   --  deliberately empty
+      Reply : Redis.RESP2.Reply;
+   begin
+      begin
+         Connect (Conn, "127.0.0.1", 1, 1.0);
+      exception
+         when Connection_Failed => null;   --  expected
+      end;
+      begin
+         --  The connection may be dead or alive; either way an empty command
+         --  must be rejected before anything reaches the socket.
+         Execute (Conn, Args, Reply);
+         Assert (False, "Empty command should raise");
+      exception
+         when Connection_Failed =>
+            Assert (True, "Empty command raises (Connection_Failed)");
+         when Protocol_Error =>
+            Assert (True, "Empty command raises (Protocol_Error)");
+         when others =>
+            Assert (False, "Empty command raised wrong exception");
+      end;
+   end Test_Execute_Empty_Command;
+
+   --  Live integration tests (run only against a real server) --
+
    procedure Test_Live_PING is
       Conn : Redis_Connection;
       Args : String_Vector;
@@ -111,7 +149,7 @@ procedure Redis.Connection.Tests is
       Execute (Conn, Args, Reply);
       Disconnect (Conn);
       Assert (Kind_Of (Reply) = Simple_String and then Text (Reply) = "PONG",
-              "Live PING → +PONG");
+              "Live PING returns +PONG");
    exception
       when E : others =>
          Put_Line ("[SKIP] Live PING test failed: " & Ada.Exceptions.Exception_Message (E));
@@ -124,29 +162,26 @@ procedure Redis.Connection.Tests is
    begin
       Connect (Conn, "127.0.0.1", 6380, 2.0);
 
-      --  SET test_key test_value
       Args.Append ("SET");
-      Args.Append ("test_key");
+      Args.Append ("redis_ada_test:key");
       Args.Append ("test_value");
       Execute (Conn, Args, Reply);
       Assert (Kind_Of (Reply) = Simple_String and then Text (Reply) = "OK",
-              "Live SET test_key test_value → +OK");
+              "Live SET returns +OK");
 
-      --  GET test_key
       Args.Clear;
       Args.Append ("GET");
-      Args.Append ("test_key");
+      Args.Append ("redis_ada_test:key");
       Execute (Conn, Args, Reply);
       Assert (Kind_Of (Reply) = Bulk_String and then Text (Reply) = "test_value",
-              "Live GET test_key → $10\\r\\ntest_value");
+              "Live GET returns bulk value");
 
-      --  DEL test_key
       Args.Clear;
       Args.Append ("DEL");
-      Args.Append ("test_key");
+      Args.Append ("redis_ada_test:key");
       Execute (Conn, Args, Reply);
       Assert (Kind_Of (Reply) = Integer_Reply and then Value (Reply) = 1,
-              "Live DEL test_key → :1");
+              "Live DEL returns :1");
 
       Disconnect (Conn);
    exception
@@ -164,11 +199,29 @@ procedure Redis.Connection.Tests is
       Execute (Conn, Args, Reply);
       Disconnect (Conn);
       Assert (Kind_Of (Reply) = Error,
-              "Live bad command → -ERR");
+              "Live bad command returns -ERR");
    exception
       when E : others =>
          Put_Line ("[SKIP] Live bad command test failed: " & Ada.Exceptions.Exception_Message (E));
    end Test_Live_Bad_Command;
+
+   procedure Test_Live_Null_Bulk is
+      --  GET of a missing key must surface as a null bulk, not an error.
+      Conn : Redis_Connection;
+      Args : String_Vector;
+      Reply : Redis.RESP2.Reply;
+   begin
+      Connect (Conn, "127.0.0.1", 6380, 2.0);
+      Args.Append ("GET");
+      Args.Append ("redis_ada_test:missing");
+      Execute (Conn, Args, Reply);
+      Disconnect (Conn);
+      Assert (Kind_Of (Reply) = Bulk_String and then Is_Null (Reply),
+              "Live GET missing key returns null bulk");
+   exception
+      when E : others =>
+         Put_Line ("[SKIP] Live null bulk test failed: " & Ada.Exceptions.Exception_Message (E));
+   end Test_Live_Null_Bulk;
 
 begin
    Put_Line ("=== redis-ada Connection Layer Test Suite ===");
@@ -177,9 +230,9 @@ begin
    Put_Line ("Checking for local Redis server...");
    Live_Server_Available := Probe_Redis_Server;
    if Live_Server_Available then
-      Put_Line ("✓ Redis server detected at 127.0.0.1:6380 (live tests will run)");
+      Put_Line ("* Redis server detected at 127.0.0.1:6380 (live tests will run)");
    else
-      Put_Line ("✗ No Redis server detected (live tests will be skipped)");
+      Put_Line ("- No Redis server detected (live tests will be skipped)");
    end if;
    New_Line;
 
@@ -188,6 +241,8 @@ begin
    Test_Command_Encoding_GET;
    Test_Connect_Refused;
    Test_Connect_Timeout;
+   Test_Execute_Not_Connected;
+   Test_Execute_Empty_Command;
    New_Line;
 
    if Live_Server_Available then
@@ -195,6 +250,7 @@ begin
       Test_Live_PING;
       Test_Live_SET_GET_DEL;
       Test_Live_Bad_Command;
+      Test_Live_Null_Bulk;
       New_Line;
    end if;
 

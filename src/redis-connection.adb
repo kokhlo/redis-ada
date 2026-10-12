@@ -31,11 +31,15 @@ package body Redis.Connection is
          --  Create a TCP socket.
          Create_Socket (Conn.Socket, Family_Inet, Socket_Stream);
 
-         --  Set socket timeout.
+         --  Set socket timeouts: connect, then every later send/receive.
          Set_Socket_Option
            (Conn.Socket,
             Socket_Level,
             (Name => Receive_Timeout, Timeout => Timeout));
+         Set_Socket_Option
+           (Conn.Socket,
+            Socket_Level,
+            (Name => Send_Timeout, Timeout => Timeout));
 
          --  Connect synchronously (blocking).
          Connect_Socket (Conn.Socket, Address);
@@ -80,6 +84,12 @@ package body Redis.Connection is
          raise Connection_Failed with "Not connected";
       end if;
 
+      --  An empty command would send an empty RESP2 array; Redis closes the
+      --  connection on such input. Reject it before touching the socket.
+      if Is_Empty (Args) then
+         raise Protocol_Error with "Empty command";
+      end if;
+
       --  Build a RESP2 array of bulk strings from the arguments.
       for S of Args loop
          Append (Command, Bulk (S));
@@ -108,6 +118,7 @@ package body Redis.Connection is
          end;
 
          if Last < Buffer'First then
+            Conn.Connected := False;
             raise Connection_Failed with "Server closed connection";
          end if;
 
@@ -121,6 +132,14 @@ package body Redis.Connection is
             Append (Accumulated, Chunk);
          end;
 
+         --  Bound the accumulator: without a cap a misbehaving peer can
+         --  make us buffer without limit.
+         if Length (Accumulated) > Max_Reply_Bytes then
+            Conn.Connected := False;
+            raise Connection_Failed with "Reply exceeds "
+              & Integer'Image (Max_Reply_Bytes / (1024 * 1024)) & " MiB limit";
+         end if;
+
          --  Attempt to parse.
          declare
             Full_Buffer : constant String := To_String (Accumulated);
@@ -129,8 +148,9 @@ package body Redis.Connection is
 
             case Parse_Status is
                when Success =>
-                  --  Remove consumed bytes from the accumulator (for pipelining support later).
-                  --  For now, we expect the full reply to be consumed.
+                  --  Remove consumed bytes from the accumulator (for
+                  --  pipelining support later). For now, we expect the
+                  --  full reply to be consumed.
                   return;
 
                when Need_More_Data =>
@@ -138,6 +158,9 @@ package body Redis.Connection is
                   null;
 
                when Redis.RESP2.Protocol_Error =>
+                  --  Stream desynchronisation cannot be recovered locally:
+                  --  mark the connection dead so the caller reconnects.
+                  Conn.Connected := False;
                   raise Protocol_Error with "Malformed server response";
             end case;
          end;
