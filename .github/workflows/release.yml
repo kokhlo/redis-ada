@@ -1,0 +1,60 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enforce alire.toml version matches the tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MANIFEST_VERSION=$(awk -F'"' '/^version *=/{print $2}' alire.toml)
+          if [ "$TAG" != "$MANIFEST_VERSION" ]; then
+            echo "::error::Tag v$TAG does not match alire.toml version $MANIFEST_VERSION"
+            exit 1
+          fi
+          echo "Version check passed: $MANIFEST_VERSION"
+
+      - name: Enforce README badge version matches the tag
+        run: |
+          BADGE=$(grep -o 'redis-[0-9][0-9.]*-blue' README.md | head -1 | sed 's/redis-//; s/-blue//')
+          if [ "$BADGE" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "::error::README badge version $BADGE does not match tag ${GITHUB_REF_NAME#v}"
+            exit 1
+          fi
+
+      - uses: alire-project/setup-alire@v5
+        with:
+          toolchain: gnat_native=14.2.1 gprbuild=25.0.1
+
+      - name: Build library and tests
+        run: |
+          alr build
+          gprbuild -p -P redis_ada_tests.gpr
+
+      - name: Run test suites
+        run: |
+          ./bin/redis-resp2-tests
+          ./bin/redis-connection-tests
+
+      - name: Create source archive
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --prefix="redis-ada-$VERSION/" -o "redis-ada-$VERSION.tar.gz" "$GITHUB_SHA"
+          shasum -a 512 "redis-ada-$VERSION.tar.gz" > "redis-ada-$VERSION.tar.gz.sha512"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            redis-ada-*.tar.gz
+            redis-ada-*.tar.gz.sha512

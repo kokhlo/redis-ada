@@ -7,6 +7,8 @@ bin/
 
 # Alire working directory (keep alire.toml)
 .alire/
+alire/
+config/
 
 # Editor temporaries
 *~

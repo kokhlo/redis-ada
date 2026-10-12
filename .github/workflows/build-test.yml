@@ -7,12 +7,56 @@ on:
   workflow_dispatch:
 
 jobs:
-  alire-build:
+  build-test:
+    name: ${{ matrix.os }} / GNAT ${{ matrix.gnat }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        gnat: ["13.2.1", "14.2.1", "16.1.0"]
+        exclude:
+          # GNAT before 14.2 has no macOS aarch64 toolchain; macos-latest is arm64.
+          - os: macos-latest
+            gnat: "13.2.1"
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: alire-project/setup-alire@v5
+        with:
+          toolchain: gnat_native=${{ matrix.gnat }} gprbuild=25.0.1
+
+      - name: Build library
+        run: alr build
+
+      - name: Build and run test suites
+        run: |
+          gprbuild -p -P redis_ada_tests.gpr
+          ./bin/redis-resp2-tests
+          ./bin/redis-connection-tests
+
+  alire-check:
+    # Prove the crate still builds the way alire-index consumers will use it.
+    name: alr with --use (as index consumer)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: alire-project/setup-alire@v5
-      - name: Build and test
+        with:
+          toolchain: gnat_native=14.2.1 gprbuild=25.0.1
+      - name: Build a dependent crate pinned to this checkout
         run: |
+          alr init myapp --in-place --no-git
+          cd myapp
+          alr with redis --use=..
           alr build
-          alr test
